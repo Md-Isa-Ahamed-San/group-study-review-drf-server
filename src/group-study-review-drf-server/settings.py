@@ -1,5 +1,5 @@
 from pathlib import Path
-
+import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -28,6 +28,9 @@ INSTALLED_APPS = [
     'django_extensions',
     'api'
 ]
+# ✅ CRITICAL: Telling Django to use my custom User model instead of its how abstract model
+
+AUTH_USER_MODEL = 'api.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -63,12 +66,19 @@ WSGI_APPLICATION = 'group-study-review-drf-server.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.0/ref/settings/#databases
 
+import os
+
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('POSTGRES_DB'),
+        'USER': os.environ.get('POSTGRES_USER'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD'),
+        'HOST': os.environ.get('DB_HOST', 'localhost'), # This should match the service name in docker-compose.yml
+        'PORT': os.environ.get('DB_PORT', '5432'),
     }
 }
+
 
 
 # Password validation
