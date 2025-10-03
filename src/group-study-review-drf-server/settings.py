@@ -26,13 +26,16 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django_extensions',
-    'api'
+    'api',
+    "rest_framework",
+    "silk",
 ]
 # ✅ CRITICAL: Telling Django to use my custom User model instead of its how abstract model
 
 AUTH_USER_MODEL = 'api.User'
 
 MIDDLEWARE = [
+"silk.middleware.SilkyMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -66,7 +69,7 @@ WSGI_APPLICATION = 'group-study-review-drf-server.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.0/ref/settings/#databases
 
-import os
+
 
 DATABASES = {
     'default': {

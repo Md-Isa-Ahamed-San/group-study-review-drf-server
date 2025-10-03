@@ -16,7 +16,11 @@ COPY src/requirements.txt .
 RUN uv pip install -r requirements.txt --system
 
 COPY src/ .
+# Corrected path to the entrypoint script
+COPY src/entrypoint.sh /app/entrypoint.sh
+
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
 
-CMD ["./entrypoint.sh"]
+CMD ["/app/entrypoint.sh"]
