@@ -12,6 +12,7 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile_picture = models.URLField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
 
     # Fix the reverse accessor clash
     groups = models.ManyToManyField(

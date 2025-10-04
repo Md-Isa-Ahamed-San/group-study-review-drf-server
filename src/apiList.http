@@ -1,0 +1,32 @@
+###
+# List all users
+GET http://localhost:8000/api/users
+
+###
+# a users details with a specific email
+GET http://localhost:8000/api/users/email/san@example.com
+###
+# Create a new user
+POST http://localhost:8000/api/users/
+Content-Type: application/json
+
+{
+    "username": "test2",
+    "email": "test@gmail.com",
+    "profile_picture": "https://picsum.photos/200/300",
+    "is_active": false
+}
+###
+# patch a user
+PATCH http://localhost:8000/api/users/email/sadia@example.com/
+Content-Type: application/json
+
+{
+    "username": "sadia_islam"
+}
+###
+
+#Delete a user with a specific email, 
+#!have to add slash at the end
+DELETE http://localhost:8000/api/users/email/san@example.com/
+###
