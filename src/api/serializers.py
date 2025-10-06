@@ -2,6 +2,10 @@ from rest_framework import serializers
 
 from .models import Submission, User
 
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
 
 class SubmissionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -22,5 +26,6 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "date_joined",
             "submissions",
+            'firebase_uid'
         ]
-        read_only_fields = ["id", "date_joined"]
+        read_only_fields = ["id", "date_joined",'firebase_uid']

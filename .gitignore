@@ -76,3 +76,6 @@ celerybeat-schedule.*
 
 # Misc
 *.swp
+
+
+firebase-service-account.json

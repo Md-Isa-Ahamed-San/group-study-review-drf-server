@@ -1,9 +1,10 @@
-from pathlib import Path
 import os
 from datetime import timedelta
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
+from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+import firebase_admin
+from firebase_admin import credentials
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.0/howto/deployment/checklist/
@@ -32,18 +33,21 @@ INSTALLED_APPS = [
     "silk",
     "rest_framework_simplejwt",
     "corsheaders",
-     'drf_spectacular'
+    "drf_spectacular",
 ]
 # ✅ CRITICAL: Telling Django to use my custom User model instead of its how abstract model
 
 AUTH_USER_MODEL = "api.User"
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
-    'ROTATE_REFRESH_TOKENS': False,
-    'BLACKLIST_AFTER_ROTATION': True,
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=10),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ROTATE_REFRESH_TOKENS": False,
+    # "BLACKLIST_AFTER_ROTATION": True,
 }
+SECURE_COOKIES = False  # 👉 Set True in production (HTTPS only)
+SESSION_COOKIE_SECURE = SECURE_COOKIES
+CSRF_COOKIE_SECURE = SECURE_COOKIES
 
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
@@ -57,13 +61,10 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+ALLOWED_HOSTS = ["*"]
 CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
 
-
-# CORS_ALLOWED_ORIGINS = [
-#     "https://yourdomain.com",
-#     "https://sub.yourdomain.com",
-# ]
 
 ROOT_URLCONF = "group-study-review-drf-server.urls"
 
@@ -104,29 +105,27 @@ DATABASES = {
 }
 
 REST_FRAMEWORK = {
-    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        
-    )
-    
+    ),
 }
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'group-study-review API',
-    'DESCRIPTION': 'Comprehensive API documentation for group-study-review',
-    'VERSION': '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,  # Set True if you want /schema/ endpoint to show schema
-    'PREPROCESSING_HOOKS': [],
-    'POSTPROCESSING_HOOKS': [],
-    'COMPONENT_SPLIT_REQUEST': True,  # Better request/response component separation
-    'SCHEMA_PATH_PREFIX': r'/api',  # If your API is under /api path
+    "TITLE": "group-study-review API",
+    "DESCRIPTION": "Comprehensive API documentation for group-study-review",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,  # Set True if you want /schema/ endpoint to show schema
+    "PREPROCESSING_HOOKS": [],
+    "POSTPROCESSING_HOOKS": [],
+    "COMPONENT_SPLIT_REQUEST": True,  # Better request/response component separation
+    "SCHEMA_PATH_PREFIX": r"/api",  # If your API is under /api path
     # Security schemes
-    'SECURITY': [{'BearerAuth': []}],
-    'SECURITY_DEFINITIONS': {
-        'BearerAuth': {
-            'type': 'http',
-            'scheme': 'bearer',
-            'bearerFormat': 'JWT',
+    "SECURITY": [{"BearerAuth": []}],
+    "SECURITY_DEFINITIONS": {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
         },
     },
 }
@@ -172,3 +171,28 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# ==============================================================================
+# BASE DIRECTORY CONFIGURATION
+# ==============================================================================
+# Correctly define BASE_DIR as the '/app' directory inside the container.
+# Path(__file__) is /app/group-study-review-drf-server/settings.py
+# .resolve().parent.parent gives us /app
+
+# ==============================================================================
+# FIREBASE ADMIN SDK INITIALIZATION
+# ==============================================================================
+
+SERVICE_ACCOUNT_KEY_PATH = BASE_DIR / "firebase-service-account.json"
+
+if not firebase_admin._apps:
+    if SERVICE_ACCOUNT_KEY_PATH.exists():
+        cred = credentials.Certificate(SERVICE_ACCOUNT_KEY_PATH)
+        firebase_admin.initialize_app(cred)
+        print("✅ Firebase Admin SDK initialized successfully.")
+    else:
+        print(
+            f"⚠️ Firebase service account key not found at: {SERVICE_ACCOUNT_KEY_PATH}"
+        )
+        print("⚠️ Firebase Admin SDK was not initialized.")

@@ -1,12 +1,201 @@
 # views.py
-from rest_framework import viewsets, status
+from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import status, viewsets
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import extend_schema, OpenApiParameter
-
-from .models import User
+from django.contrib.auth import authenticate
+from rest_framework.permissions import IsAuthenticated
+from api.utils import generate_tokens_for_user
+from firebase_admin import auth
 from .serializers import UserSerializer
+from .models import User
+from rest_framework_simplejwt.views import TokenRefreshView
+
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from django.conf import settings
+class DevGetTokenView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email")
+
+        if not email:
+            return Response(
+                {"error": "Email required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        tokens = generate_tokens_for_user(user)
+
+        return Response(
+            {
+                "token": {
+                    "authToken": tokens["access"],
+                    "refreshToken": tokens["refresh"],
+                }
+            }
+        )
+
+
+class FirebaseLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        firebase_token = request.data.get("token")
+        print("ALL DATA:", request.data)
+
+        if not firebase_token:
+            return Response(
+                {"error": "Firebase token is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Verify the token with Firebase
+            decoded_token = auth.verify_id_token(firebase_token)
+            firebase_uid = decoded_token["uid"]
+            email = decoded_token.get("email")
+            username = decoded_token.get("name", email)  # Use name, fallback to email
+
+        except Exception as e:
+            # Token is invalid or expired
+            return Response(
+                {"error": f"Invalid Firebase token: {str(e)}"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        # Get or create the user in your Django database
+        # We match by firebase_uid to ensure uniqueness
+        user, created = User.objects.get_or_create(
+            firebase_uid=firebase_uid, defaults={"email": email, "username": username}
+        )
+
+        # If the user was just created, you might want to set a default password
+        # or mark them as having no usable password.
+        if created:
+            user.set_unusable_password()
+            user.save()
+
+        # Now, generate your OWN backend's tokens for this user
+        tokens = generate_tokens_for_user(user)
+        # print("🔑 ACCESS TOKEN:", tokens["access"])
+        # print("🔁 REFRESH TOKEN:", tokens["refresh"])
+        response = Response()
+        
+
+        # Set the refresh token in a secure, HTTP-only cookie
+        response.set_cookie(
+            key="refresh_token",
+            value=tokens["refresh"],
+            httponly=True,
+            secure=False,  # Set to False for local HTTP development
+            samesite="Lax",
+        )
+
+        # Send the access token and user data in the response body
+        response.data = {
+            "authToken": tokens["access"],
+            "user": UserSerializer(user).data,
+        }
+        response.status_code = status.HTTP_200_OK
+        return response
+
+class LogoutView(APIView):
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        # Create a simple success response
+        response = Response(
+            {'detail': 'Logout successful'},
+            status=status.HTTP_200_OK
+        )
+        
+        # Clear the refresh token cookie
+        response.delete_cookie('refresh_token', path='/api/')
+        
+        return response
+class CookieTokenRefreshView(TokenRefreshView):
+    # permission_classes = [AllowAny]
+    
+    def post(self, request, *args, **kwargs):
+        refresh_token = request.COOKIES.get('refresh_token')
+        
+        if not refresh_token:
+            return Response(
+                {
+                    'detail': 'Refresh token not found. Please login again.',
+                    'code': 'REFRESH_TOKEN_NOT_FOUND'
+                },
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        request.data['refresh'] = refresh_token
+        
+        try:
+            response = super().post(request, *args, **kwargs)
+            
+            if response.status_code == 200:
+                access_token = response.data.get('access')
+                new_refresh_token = response.data.get('refresh')
+                
+                if new_refresh_token:
+                    response.set_cookie(
+                        key='refresh_token',
+                        value=new_refresh_token,
+                        httponly=True,
+                        secure=settings.SECURE_COOKIES,
+                        samesite='Lax',
+                        max_age=int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds()),
+                        path='/api/'
+                    )
+                    del response.data['refresh']
+                
+                response.data = {
+                    'access': access_token,
+                    'detail': 'Token refreshed successfully'
+                }
+            
+            return response
+            
+        except InvalidToken:
+            return Response(
+                {
+                    'detail': 'Refresh token is invalid or expired. Please login again.',
+                    'code': 'TOKEN_EXPIRED'
+                },
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        except TokenError as e:
+            return Response(
+                {
+                    'detail': f'Token error: {str(e)}',
+                    'code': 'TOKEN_ERROR'
+                },
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+@extend_schema(tags=["Authentication"])
+class UserProfileView(APIView):
+    permission_classes = [
+        IsAuthenticated
+    ]  # This ensures only logged-in users can access it
+
+    @extend_schema(
+        summary="Get current user's profile",
+        description="Retrieves the profile data for the user authenticated by the access token.",
+    )
+    def get(self, request):
+        # request.user is automatically populated by DRF's authentication classes
+        # when a valid access token is provided.
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
 
 
 @extend_schema(tags=["Users (by ID)"])
@@ -52,7 +241,9 @@ class UserViewSet(viewsets.ModelViewSet):
         description="Get the details of a specific user by their unique ID.",
     )
     def retrieve(self, request, *args, **kwargs):
-        return super().retrieve(request, *args, **kwargs)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
     @extend_schema(
         summary="Update a user by ID",
