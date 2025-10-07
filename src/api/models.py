@@ -1,11 +1,22 @@
+# ================== Standard Library ==================
 import uuid
 
+# ================== Django ============================
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator
 from django.db import models
 from django.utils import timezone
+
+# ================== DRF ===============================
+# 
+
+# ================== Third-Party =======================
+# 
+
+# ================== Local / App Imports =================
+# 
 
 
 # ==================== USER MODEL ====================
@@ -71,14 +82,12 @@ class User(AbstractUser):
 
 # ==================== CLASS MODEL ====================
 class Class(models.Model):
-    """
-    Represents a classroom or a group where users can collaborate.
-    """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     class_name = models.CharField(max_length=255)
     description = models.TextField()
     # A unique, user-friendly code that members can use to join the class.
-    class_code = models.CharField(max_length=50, unique=True)
+    class_code = models.CharField(max_length=7, unique=True)
 
     # A foreign key to the User who created the class.
     # The `related_name` 'created_classes' allows us to easily query all classes

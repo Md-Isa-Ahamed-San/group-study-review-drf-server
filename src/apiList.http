@@ -2,6 +2,7 @@
 # List all users
 GET http://localhost:8000/api/users
 
+
 ###
 # a users details with a specific email
 GET http://localhost:8000/api/users/email/isa@example.com
@@ -52,3 +53,17 @@ Content-Type: application/json
 {
   "email": "sadiaa@example.com"
 }
+
+
+#!==================== CLASS API TESTS ====================
+###
+# Create a new class
+POST http://localhost:8000/api/class/  HTTP/1.1
+Content-Type: application/json
+Authorization : Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzU5ODI2OTUxLCJpYXQiOjE3NTk4MjU3NTEsImp0aSI6IjZhOTY5MzNhNWQxYjRhYTQ5OWQ3MzA4MGEwZjJlMDljIiwidXNlcl9pZCI6Ijg1MGU1Yzg0LTAxNGMtNGZmOC04NmIxLWFiZWI1YmE4YzY2OCIsImVtYWlsIjoidXNlcjFAZ21haWwuY29tIn0.6a91fs-k4-1Qeo3lAaj2mXnAHqfoZWxMvzvcNGUZc6U
+
+{
+  "class_name": "Physics 101",
+  "description": "Introduction to basic physics concepts for beginners."
+}
+###

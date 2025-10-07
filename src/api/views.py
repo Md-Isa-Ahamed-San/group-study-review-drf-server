@@ -1,50 +1,34 @@
-# views.py
+# ================== Standard Library ==================
+from venv import create
+import random
+import string
+
+# ================== Django ============================
 from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import status, viewsets
-from rest_framework.permissions import AllowAny
+from django.conf import settings
+from django.contrib.auth import authenticate
+
+# ================== DRF ===============================
+from rest_framework import generics, permissions, status, viewsets
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.contrib.auth import authenticate
-from rest_framework.permissions import IsAuthenticated
+from .serializers import ClassCreateSerializer, UserSerializer
 from api.utils import generate_tokens_for_user
-from firebase_admin import auth
-from .serializers import UserSerializer
-from .models import User
+
+# ================== DRF-Spectacular ===================
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+
+# ================== Third-Party =======================
 from rest_framework_simplejwt.views import TokenRefreshView
-
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from django.conf import settings
-class DevGetTokenView(APIView):
-    permission_classes = [AllowAny]
+from firebase_admin import auth
 
-    def post(self, request):
-        email = request.data.get("email")
-
-        if not email:
-            return Response(
-                {"error": "Email required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            user = User.objects.get(email=email)
-        except User.DoesNotExist:
-            return Response(
-                {"error": "User not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        tokens = generate_tokens_for_user(user)
-
-        return Response(
-            {
-                "token": {
-                    "authToken": tokens["access"],
-                    "refreshToken": tokens["refresh"],
-                }
-            }
-        )
+# ================== Local / App Imports =================
+from .models import Class, User
 
 
+#! ==================== AUTH MODEL VIEWS ====================
 class FirebaseLoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -89,7 +73,6 @@ class FirebaseLoginView(APIView):
         # print("🔑 ACCESS TOKEN:", tokens["access"])
         # print("🔁 REFRESH TOKEN:", tokens["refresh"])
         response = Response()
-        
 
         # Set the refresh token in a secure, HTTP-only cookie
         response.set_cookie(
@@ -108,84 +91,82 @@ class FirebaseLoginView(APIView):
         response.status_code = status.HTTP_200_OK
         return response
 
+
 class LogoutView(APIView):
     permission_classes = [AllowAny]
-    
+
     def post(self, request):
-        # Create a simple success response
-        response = Response(
-            {'detail': 'Logout successful'},
-            status=status.HTTP_200_OK
-        )
-        
-        # Clear the refresh token cookie
-        response.delete_cookie('refresh_token', path='/api/')
-        
+        response = Response({"detail": "Logout successful"}, status=status.HTTP_200_OK)
+
+        response.delete_cookie("refresh_token", path="/api/")
+
         return response
+
+
 class CookieTokenRefreshView(TokenRefreshView):
     # permission_classes = [AllowAny]
-    
+
     def post(self, request, *args, **kwargs):
-        refresh_token = request.COOKIES.get('refresh_token')
-        
+        refresh_token = request.COOKIES.get("refresh_token")
+
         if not refresh_token:
             return Response(
                 {
-                    'detail': 'Refresh token not found. Please login again.',
-                    'code': 'REFRESH_TOKEN_NOT_FOUND'
+                    "detail": "Refresh token not found. Please login again.",
+                    "code": "REFRESH_TOKEN_NOT_FOUND",
                 },
-                status=status.HTTP_401_UNAUTHORIZED
+                status=status.HTTP_401_UNAUTHORIZED,
             )
-        
-        request.data['refresh'] = refresh_token
-        
+
+        request.data["refresh"] = refresh_token
+
         try:
             response = super().post(request, *args, **kwargs)
-            
+
             if response.status_code == 200:
-                access_token = response.data.get('access')
-                new_refresh_token = response.data.get('refresh')
-                
-                if new_refresh_token:
+                access_token = response.data.get("access")
+                if new_refresh_token := response.data.get("refresh"):
                     response.set_cookie(
-                        key='refresh_token',
+                        key="refresh_token",
                         value=new_refresh_token,
                         httponly=True,
                         secure=settings.SECURE_COOKIES,
-                        samesite='Lax',
-                        max_age=int(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds()),
-                        path='/api/'
+                        samesite="Lax",
+                        max_age=int(
+                            settings.SIMPLE_JWT[
+                                "REFRESH_TOKEN_LIFETIME"
+                            ].total_seconds()
+                        ),
+                        path="/api/",
                     )
-                    del response.data['refresh']
-                
+                    del response.data["refresh"]
+
                 response.data = {
-                    'access': access_token,
-                    'detail': 'Token refreshed successfully'
+                    "access": access_token,
+                    "detail": "Token refreshed successfully",
                 }
-            
+
             return response
-            
+
         except InvalidToken:
             return Response(
                 {
-                    'detail': 'Refresh token is invalid or expired. Please login again.',
-                    'code': 'TOKEN_EXPIRED'
+                    "detail": "Refresh token is invalid or expired. Please login again.",
+                    "code": "TOKEN_EXPIRED",
                 },
-                status=status.HTTP_401_UNAUTHORIZED
+                status=status.HTTP_401_UNAUTHORIZED,
             )
         except TokenError as e:
             return Response(
-                {
-                    'detail': f'Token error: {str(e)}',
-                    'code': 'TOKEN_ERROR'
-                },
-                status=status.HTTP_401_UNAUTHORIZED
+                {"detail": f"Token error: {str(e)}", "code": "TOKEN_ERROR"},
+                status=status.HTTP_401_UNAUTHORIZED,
             )
+
+
+#! ==================== USER MODEL VIEWS ====================
 @extend_schema(tags=["Authentication"])
 class UserProfileView(APIView):
-    permission_classes = [
-        IsAuthenticated
-    ]  # This ensures only logged-in users can access it
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         summary="Get current user's profile",
@@ -322,3 +303,26 @@ class UserByEmailView(APIView):
         return Response(
             {"message": "User deleted successfully"}, status=status.HTTP_204_NO_CONTENT
         )
+
+
+#! ==================== CLASS MODEL VIEWS ====================
+class ClassCreateView(generics.CreateAPIView):
+    queryset = Class.objects.all()
+    serializer_class = ClassCreateSerializer
+    permission_classes = [IsAuthenticated]
+
+    def generate_unique_class_code(self, length=7):
+
+        while True:
+            code = "".join(
+                random.choices(string.ascii_uppercase + string.digits, k=length)
+            )
+            if not Class.objects.filter(class_code=code).exists():
+                return code #alphanumeric code 
+
+    def perform_create(self, serializer):
+        # Generate a unique class_code
+        class_code = self.generate_unique_class_code()
+
+        # Save with created_by and class_code
+        serializer.save(created_by=self.request.user, class_code=class_code)
