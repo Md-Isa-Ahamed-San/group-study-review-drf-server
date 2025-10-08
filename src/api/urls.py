@@ -8,11 +8,12 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 # ================== Third-Party =======================
-# 
 
 # ================== Local / App Imports =================
 from .views import (
-    ClassCreateView,
+    # You no longer need ClassListCreateView or ClassRetrieveUpdateDestroyView
+
+    ClassViewSet,
     FirebaseLoginView,
     LogoutView,
     UserByEmailView,
@@ -22,16 +23,13 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r"users", UserViewSet, basename="user")
-
+router.register(r"class", ClassViewSet, basename="class")
 
 urlpatterns = [
-    path(
-        "api/users/email/<str:email>/", UserByEmailView.as_view(), name="user-by-email"
-    ),
-    path("api/", include(router.urls)),  # This creates all ID-based routes
+    path("api/", include(router.urls)),#this will handle all class(viewsets) and user(viewsets) endpoints.
+
+    path("api/users/email/<str:email>/", UserByEmailView.as_view(), name="user-by-email"),
     path("api/login/", FirebaseLoginView.as_view(), name="login"),
     path("api/logout/", LogoutView.as_view(), name="logout"),
     path("api/me/", UserProfileView.as_view(), name="user-profile"),
-
-    path("api/class/",ClassCreateView.as_view(),name="create-class"),
 ]

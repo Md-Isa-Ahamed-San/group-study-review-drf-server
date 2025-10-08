@@ -1,31 +1,32 @@
 # ================== Standard Library ==================
-from venv import create
 import random
 import string
 
+from django.conf import settings
+
 # ================== Django ============================
 from django.shortcuts import get_object_or_404
-from django.conf import settings
-from django.contrib.auth import authenticate
-
-# ================== DRF ===============================
-from rest_framework import generics, permissions, status, viewsets
-from rest_framework.permissions import AllowAny, IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
-from .serializers import ClassCreateSerializer, UserSerializer
-from api.utils import generate_tokens_for_user
+from django.db.models import Q
 
 # ================== DRF-Spectacular ===================
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from firebase_admin import auth
+
+# ================== DRF ===============================
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 
 # ================== Third-Party =======================
 from rest_framework_simplejwt.views import TokenRefreshView
-from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from firebase_admin import auth
+from api.utils import generate_tokens_for_user
 
 # ================== Local / App Imports =================
 from .models import Class, User
+from .serializers import ClassCreateSerializer, ClassDetailSerializer, UserSerializer
 
 
 #! ==================== AUTH MODEL VIEWS ====================
@@ -261,6 +262,8 @@ class UserByEmailView(APIView):
     DELETE /api/users/email/{email}/  - Delete by email
     """
 
+    #! add permissions later for faster development
+    # permission_classes = [IsAuthenticated]
     @extend_schema(
         summary="Retrieve a user by email",
         description="Get the details of a specific user by their email address.",
@@ -306,23 +309,176 @@ class UserByEmailView(APIView):
 
 
 #! ==================== CLASS MODEL VIEWS ====================
-class ClassCreateView(generics.CreateAPIView):
+
+
+class ClassViewSet(viewsets.ModelViewSet):
+    """
+    Automatic CRUD by Class Code:
+    GET    /api/class/                - List all classes of a user
+    POST   /api/class/                - Create a new class
+    GET    /api/class/{class_code}/   - Retrieve a class by its code
+    PATCH  /api/class/{class_code}/   - Partially update a class by its code
+    PUT    /api/class/{class_code}/   - Fully update a class by its code
+    DELETE /api/class/{class_code}/   - Delete a class by its code
+
+    Custom Actions:
+    POST   /api/class/{class_code}/join/        - Join a class
+    POST   /api/class/{class_code}/leave/       - Leave a class
+    PATCH  /api/class/{class_code}/change_role/ - (Admin) Change a user's role in the class
+    """
+
     queryset = Class.objects.all()
-    serializer_class = ClassCreateSerializer
-    permission_classes = [IsAuthenticated]
+    # permission_classes = [IsAuthenticated,IsCreatorOrAdminOrReadOnly]
+    lookup_field = "class_code"
+
+    def get_queryset(self):
+        """
+        Overrides the default queryset. 
+        - For the 'list' action, it returns only classes the user is a part of.
+        - For all other actions, it uses the default queryset (Class.objects.all()),
+          allowing actions like 'join' to find any class.
+        """
+        # Get the original queryset
+        queryset = super().get_queryset()
+
+        # If the action is to list classes, filter it by the current user.
+        if self.action == 'list':
+            user = self.request.user
+            if user.is_authenticated:
+                return queryset.filter(
+                    Q(members=user) | Q(experts=user) | Q(admins=user)
+                ).distinct()
+            return queryset.none() # Or handle unauthenticated users as you see fit
+
+        # For 'retrieve', 'update', 'join', 'leave', etc., return the full queryset.
+        return queryset
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return ClassCreateSerializer
+        return ClassDetailSerializer
+
+
+
+    # ================== HELPER METHODS ==================
+    def _is_user_in_class(self, user, class_obj):
+        is_member = class_obj.members.filter(pk=user.pk).exists()
+        is_expert = class_obj.experts.filter(pk=user.pk).exists()
+        is_admin = class_obj.admins.filter(pk=user.pk).exists()
+        return is_member or is_expert or is_admin
+
+    def _remove_user_from_all_roles(self, user, class_obj):
+        class_obj.members.remove(user)
+        class_obj.experts.remove(user)
+        class_obj.admins.remove(user)
+
+    # ================== DEFAULT ACTIONS ==================
 
     def generate_unique_class_code(self, length=7):
-
         while True:
             code = "".join(
                 random.choices(string.ascii_uppercase + string.digits, k=length)
             )
             if not Class.objects.filter(class_code=code).exists():
-                return code #alphanumeric code 
+                return code
 
     def perform_create(self, serializer):
-        # Generate a unique class_code
         class_code = self.generate_unique_class_code()
+        class_instance = serializer.save(
+            created_by=self.request.user, class_code=class_code
+        )
+        class_instance.admins.add(self.request.user)
 
-        # Save with created_by and class_code
-        serializer.save(created_by=self.request.user, class_code=class_code)
+    # ================== CUSTOM ACTIONS ==================
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def join(self, request, class_code=None):
+        class_obj = self.get_object()
+        user = request.user
+
+        if self._is_user_in_class(user, class_obj):
+            return Response(
+                {"detail": "You are already a member of this class."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        class_obj.members.add(user)
+        return Response(
+            {"detail": "You have successfully joined the class."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], permission_classes=[IsAuthenticated])
+    def leave(self, request, class_code=None):
+        class_obj = self.get_object()
+        user = request.user
+
+        if not self._is_user_in_class(user, class_obj):
+            return Response(
+                {"detail": "You are not a member of this class."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        self._remove_user_from_all_roles(user, class_obj)
+        return Response(
+            {"detail": "You have successfully left the class."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["patch"], permission_classes=[IsAuthenticated])
+    def change_role(self, request, class_code=None):
+        """
+        Allows a class admin to change the role of another user in the class.
+        Expects a body with: {"user_id": "<uuid>", "new_role": "expert"}
+        """
+        class_obj = self.get_object()
+        requesting_user = request.user
+
+        if requesting_user not in class_obj.admins.all():
+            return Response(
+                {"detail": "You do not have permission to change roles."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        user_id = request.data.get("user_id")
+        new_role = request.data.get("new_role")
+
+        if not user_id or not new_role:
+            return Response(
+                {"detail": "Both 'user_id' and 'new_role' are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_role not in ["member", "expert", "admin"]:
+            return Response(
+                {"detail": "Invalid role. Choose from 'member', 'expert', or 'admin'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            target_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if not self._is_user_in_class(target_user, class_obj):
+            return Response(
+                {"detail": "This user is not a member of the class."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        self._remove_user_from_all_roles(target_user, class_obj)
+
+        if new_role == "member":
+            class_obj.members.add(target_user)
+        elif new_role == "expert":
+            class_obj.experts.add(target_user)
+        elif new_role == "admin":
+            class_obj.admins.add(target_user)
+
+        return Response(
+            {
+                "detail": f"Successfully changed {target_user.username}'s role to {new_role}."
+            },
+            status=status.HTTP_200_OK,
+        )
