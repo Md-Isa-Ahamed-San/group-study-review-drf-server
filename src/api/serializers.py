@@ -12,7 +12,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # ================== Local / App Imports =================
-from .models import Class, Submission, User
+from .models import Class, Submission, User, Task
 
 
 class SubmissionSerializer(serializers.ModelSerializer):
@@ -22,6 +22,19 @@ class SubmissionSerializer(serializers.ModelSerializer):
 
 
 #! ==================== USER SERIALIZERS ====================
+class BasicUserSerializer(serializers.ModelSerializer): #this serializer is for to get the username in the admin,members, expert field of class details
+    """
+    A simplified User serializer that only includes essential public information.
+    Perfect for nesting within other serializers like ClassDetailSerializer.
+    """
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "profile_picture",
+        ]
 class UserSerializer(serializers.ModelSerializer):
     submissions = SubmissionSerializer(many=True, read_only=True)
 
@@ -50,18 +63,60 @@ class ClassCreateSerializer(serializers.ModelSerializer):
         fields = ["class_name", "description"]
 
 
-class ClassDetailSerializer(serializers.ModelSerializer):
-    created_by = serializers.CharField(source='created_by.username', read_only=True)
+class TaskSerializer(serializers.ModelSerializer):
+    # Use a read-only serializer to show user details instead of just the ID
+    created_by = UserSerializer(read_only=True)
 
-    members = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), many=True, required=False
-    )
-    experts = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), many=True, required=False
-    )
-    admins = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), many=True, required=False
-    )
+    # Allows us to set the class object by its UUID on creation
+    class_obj_id = serializers.UUIDField(write_only=True, source="class_obj")
+
+    class Meta:
+        model = Task
+        fields = [
+            "id",
+            "class_obj_id",  # Write-only field for creating a task
+            "title",
+            "description",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "dueDate",
+            "status",
+            "document",
+        ]
+        read_only_fields = ["id", "created_by", "created_at", "updated_at"]
+
+    def validate_class_obj_id(self, value):
+        """
+        Check that the class exists and the user is an expert or creator.
+        """
+        request = self.context.get("request")
+        user = request.user
+
+        try:
+            class_instance = Class.objects.get(id=value)
+        except Class.DoesNotExist as e:
+            raise serializers.ValidationError("Class not found.") from e
+
+        # Check if the user has permission to create a task in this class (e.g., must be an expert)
+        if not (
+            class_instance.experts.filter(id=user.id).exists()
+            or class_instance.admins.filter(id=user.id).exists()
+        ):
+            raise serializers.ValidationError(
+                "You do not have permission to create a task in this class."
+            )
+
+        return class_instance
+
+
+class ClassDetailSerializer(serializers.ModelSerializer):
+    created_by = serializers.CharField(source="created_by.username", read_only=True)
+
+    members = BasicUserSerializer(many=True, read_only=True)
+    experts = BasicUserSerializer(many=True, read_only=True)
+    admins = BasicUserSerializer(many=True, read_only=True)
+    tasks = TaskSerializer(many=True, read_only=True)
 
     class Meta:
         model = Class
@@ -75,5 +130,9 @@ class ClassDetailSerializer(serializers.ModelSerializer):
             "members",
             "experts",
             "admins",
+            "tasks"
         ]
         read_only_fields = ["id", "class_code", "created_by", "created_at"]
+
+
+#! ==================== TASK SERIALIZER ====================

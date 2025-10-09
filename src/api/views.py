@@ -13,7 +13,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from firebase_admin import auth
 
 # ================== DRF ===============================
-from rest_framework import generics, status, viewsets
+from rest_framework import  status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -25,8 +25,10 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from api.utils import generate_tokens_for_user
 
 # ================== Local / App Imports =================
-from .models import Class, User
-from .serializers import ClassCreateSerializer, ClassDetailSerializer, UserSerializer
+from .models import Class, User,Task
+from .serializers import ClassCreateSerializer, ClassDetailSerializer, UserSerializer,TaskSerializer
+from .permissions import IsClassMember, IsTaskCreatorOrClassExpert # Import custom permissions
+
 
 
 #! ==================== AUTH MODEL VIEWS ====================
@@ -482,3 +484,70 @@ class ClassViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+
+#! ==================== TASK MODEL VIEWS ====================
+
+class TaskViewSet(viewsets.ModelViewSet):
+    """
+    Provides CRUD functionality for Tasks.
+    - Create: POST /api/tasks/
+    - Retrieve: GET /api/tasks/{task_id}/
+    - Update: PUT/PATCH /api/tasks/{task_id}/
+    - Delete: DELETE /api/tasks/{task_id}/
+    """
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
+    permission_classes = [IsAuthenticated, IsTaskCreatorOrClassExpert]
+
+    def get_permissions(self):
+        """
+        Instantiates and returns the list of permissions that this view requires.
+        - 'list' and 'retrieve' actions require the user to be a member of the class.
+        - Other actions (create, update, destroy) require the user to be the task creator or a class admin.
+        """
+        if self.action in ['retrieve']:
+            return [IsAuthenticated(), IsClassMember()]
+        return super().get_permissions()
+
+    def perform_create(self, serializer):
+        # Automatically set the created_by field to the current user
+        serializer.save(created_by=self.request.user)
+
+class ClassTaskViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Provides a read-only endpoint to list tasks for a specific class.
+    - List: GET /api/class/{class_code}/tasks/
+    """
+    serializer_class = TaskSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        This view should return a list of all the tasks
+        for the class as determined by the class_code portion of the URL.
+        """
+        class_code = self.kwargs['class_class_code']
+        return Task.objects.filter(class_obj__class_code=class_code)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+
+        # Check if the user is a member of the class
+        class_obj = get_object_or_404(Class, class_code=self.kwargs['class_class_code'])
+        if (
+            request.user not in class_obj.members.all()
+            and request.user not in class_obj.experts.all()
+            and request.user not in class_obj.admins.all()
+        ):
+            return Response({"detail": "You are not a member of this class."}, status=status.HTTP_403_FORBIDDEN)
+
+        active_tasks = queryset.filter(status='ongoing')
+        completed_tasks = queryset.filter(status='completed')
+
+        data = {
+            'activeTasks': self.get_serializer(active_tasks, many=True).data,
+            'completedTasks': self.get_serializer(completed_tasks, many=True).data,
+        }
+        return Response(data)
