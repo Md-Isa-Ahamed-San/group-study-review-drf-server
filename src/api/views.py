@@ -7,7 +7,7 @@ from django.conf import settings
 # ================== Django ============================
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
-
+from django.utils import timezone
 # ================== DRF-Spectacular ===================
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from firebase_admin import auth
@@ -25,10 +25,9 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from api.utils import generate_tokens_for_user
 
 # ================== Local / App Imports =================
-from .models import Class, User,Task
-from .serializers import ClassCreateSerializer, ClassDetailSerializer, UserSerializer,TaskSerializer
-from .permissions import IsClassMember, IsTaskCreatorOrClassExpert # Import custom permissions
-
+from .models import Class, Submission, User,Task
+from .serializers import ClassCreateSerializer, ClassDetailSerializer, SubmissionSerializer, UserSerializer,TaskSerializer
+from .permissions import IsClassMember, IsTaskCreatorOrClassExpert,IsSubmissionOwner # Import custom permissions
 
 
 #! ==================== AUTH MODEL VIEWS ====================
@@ -493,6 +492,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     """
     Provides CRUD functionality for Tasks.
     - Create: POST /api/tasks/
+    - Submit to Task: POST /api/tasks/{id}/submit/
     - Retrieve: GET /api/tasks/{task_id}/
     - Update: PUT/PATCH /api/tasks/{task_id}/
     - Delete: DELETE /api/tasks/{task_id}/
@@ -507,13 +507,44 @@ class TaskViewSet(viewsets.ModelViewSet):
         - 'list' and 'retrieve' actions require the user to be a member of the class.
         - Other actions (create, update, destroy) require the user to be the task creator or a class admin.
         """
-        if self.action in ['retrieve']:
+        if self.action in ['retrieve', 'submit']:
             return [IsAuthenticated(), IsClassMember()]
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        # Automatically set the created_by field to the current user
         serializer.save(created_by=self.request.user)
+    
+    @action(detail=True, methods=["post"])
+    def submit(self, request, pk=None):
+        """
+        Handles a user's submission for this specific task.
+        """
+        task = self.get_object()
+        user = request.user
+
+        # Prevent submissions if the task is not ongoing
+        if timezone.now() > task.dueDate:
+            return Response(
+                {"detail": "The deadline for this task has passed. Submissions are no longer accepted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Prevent duplicate submissions by the same user
+        if Submission.objects.filter(task=task, user=user).exists():
+            return Response(
+                {"detail": "You have already submitted a solution for this task."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Use the serializer to validate the request data (e.g., the document URL)
+        serializer = SubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        # Save the submission, linking it to the current task and user
+        serializer.save(task=task, user=user)
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 class ClassTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -551,3 +582,21 @@ class ClassTaskViewSet(viewsets.ReadOnlyModelViewSet):
             'completedTasks': self.get_serializer(completed_tasks, many=True).data,
         }
         return Response(data)
+    
+
+
+class SubmissionViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Provides read-only access to submissions.
+    - Retrieve: GET /api/submissions/{id}/
+    - List:     GET /api/submissions/
+    """
+    queryset = Submission.objects.all()
+    serializer_class = SubmissionSerializer
+    permission_classes = [IsAuthenticated, IsSubmissionOwner]
+
+    def get_queryset(self):
+        """
+        Users should only be able to see their own submissions.
+        """
+        return Submission.objects.filter(user=self.request.user)

@@ -135,4 +135,21 @@ class ClassDetailSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "class_code", "created_by", "created_at"]
 
 
-#! ==================== TASK SERIALIZER ====================
+#! ==================== SUBMISSION SERIALIZER ====================
+
+class SubmissionSerializer(serializers.ModelSerializer):
+    # Nested serializer to show user details instead of just an ID
+    user = BasicUserSerializer(read_only=True)
+
+    class Meta:
+        model = Submission
+        fields = [
+            "id",
+            "task",
+            "user",
+            "submitted_at",
+            "document",
+            "user_upvotes",
+            "expert_upvotes",
+        ]
+        read_only_fields = ["id", "user", "task", "submitted_at", "user_upvotes", "expert_upvotes"]
