@@ -19,14 +19,22 @@ class SubmissionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Submission
         fields = "__all__"
+class UserIDSubmissionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Submission
+        fields = "id","user"
+        # fields = "__all__"
 
 
 #! ==================== USER SERIALIZERS ====================
-class BasicUserSerializer(serializers.ModelSerializer): #this serializer is for to get the username in the admin,members, expert field of class details
+class BasicUserSerializer(
+    serializers.ModelSerializer
+):  # this serializer is for to get the username in the admin,members, expert field of class details
     """
     A simplified User serializer that only includes essential public information.
     Perfect for nesting within other serializers like ClassDetailSerializer.
     """
+
     class Meta:
         model = User
         fields = [
@@ -35,6 +43,8 @@ class BasicUserSerializer(serializers.ModelSerializer): #this serializer is for 
             "email",
             "profile_picture",
         ]
+
+
 class UserSerializer(serializers.ModelSerializer):
     submissions = SubmissionSerializer(many=True, read_only=True)
 
@@ -63,11 +73,12 @@ class ClassCreateSerializer(serializers.ModelSerializer):
         fields = ["class_name", "description"]
 
 
-class TaskSerializer(serializers.ModelSerializer):
-    # Use a read-only serializer to show user details instead of just the ID
-    created_by = UserSerializer(read_only=True)
 
-    # Allows us to set the class object by its UUID on creation
+
+class TaskSerializer(serializers.ModelSerializer):
+
+    submissions = UserIDSubmissionSerializer(many=True, read_only=True)
+
     class_obj_id = serializers.UUIDField(write_only=True, source="class_obj")
 
     class Meta:
@@ -81,10 +92,11 @@ class TaskSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "dueDate",
-            "status",
+
             "document",
+            "submissions"
         ]
-        read_only_fields = ["id", "created_by", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_by", "created_at", "updated_at","submissions"]
 
     def validate_class_obj_id(self, value):
         """
@@ -130,12 +142,13 @@ class ClassDetailSerializer(serializers.ModelSerializer):
             "members",
             "experts",
             "admins",
-            "tasks"
+            "tasks",
         ]
         read_only_fields = ["id", "class_code", "created_by", "created_at"]
 
 
 #! ==================== SUBMISSION SERIALIZER ====================
+
 
 class SubmissionSerializer(serializers.ModelSerializer):
     # Nested serializer to show user details instead of just an ID
@@ -152,4 +165,11 @@ class SubmissionSerializer(serializers.ModelSerializer):
             "user_upvotes",
             "expert_upvotes",
         ]
-        read_only_fields = ["id", "user", "task", "submitted_at", "user_upvotes", "expert_upvotes"]
+        read_only_fields = [
+            "id",
+            "user",
+            "task",
+            "submitted_at",
+            "user_upvotes",
+            "expert_upvotes",
+        ]

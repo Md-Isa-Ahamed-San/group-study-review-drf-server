@@ -144,12 +144,7 @@ class Task(models.Model):
     """
     Represents an assignment or task assigned within a Class.
     """
-    # Defines a set of choices for the `status` field.
-    # This provides a dropdown menu in the Django admin and validates the input.
-    STATUS_CHOICES = [
-        ("ongoing", "Ongoing"),
-        ("completed", "Completed"),
-    ]
+ 
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -175,7 +170,7 @@ class Task(models.Model):
     # This field uses the custom `validate_future_date` validator.
     dueDate = models.DateTimeField(validators=[validate_future_date])
 
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="ongoing")
+    
 
     document = models.URLField(blank=True, null=True, validators=[validate_url])
 

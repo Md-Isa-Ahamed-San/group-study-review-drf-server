@@ -16,6 +16,7 @@ from .views import (
     ClassViewSet,
     FirebaseLoginView,
     LogoutView,
+    SubmissionViewSet,
     UserByEmailView,
     UserProfileView,
     UserViewSet,
@@ -27,6 +28,7 @@ router = DefaultRouter()
 router.register(r"users", UserViewSet, basename="user")
 router.register(r"class", ClassViewSet, basename="class")
 router.register(r"tasks", TaskViewSet, basename="task")
+router.register(r"submissions", SubmissionViewSet, basename="submissions")
 
 # Create a nested router for class tasks
 class_router = routers.NestedSimpleRouter(router, r"class", lookup="class")

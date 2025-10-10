@@ -8,12 +8,13 @@ from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.utils import timezone
+
 # ================== DRF-Spectacular ===================
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from firebase_admin import auth
 
 # ================== DRF ===============================
-from rest_framework import  status, viewsets
+from rest_framework import status, viewsets, mixins
 from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -25,9 +26,19 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from api.utils import generate_tokens_for_user
 
 # ================== Local / App Imports =================
-from .models import Class, Submission, User,Task
-from .serializers import ClassCreateSerializer, ClassDetailSerializer, SubmissionSerializer, UserSerializer,TaskSerializer
-from .permissions import IsClassMember, IsTaskCreatorOrClassExpert,IsSubmissionOwner # Import custom permissions
+from .models import Class, Submission, User, Task
+from .serializers import (
+    ClassCreateSerializer,
+    ClassDetailSerializer,
+    SubmissionSerializer,
+    UserSerializer,
+    TaskSerializer,
+)
+from .permissions import (
+    IsClassMember,
+    IsTaskCreatorOrClassExpert,
+    IsSubmissionOwner,
+)  # Import custom permissions
 
 
 #! ==================== AUTH MODEL VIEWS ====================
@@ -334,7 +345,7 @@ class ClassViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """
-        Overrides the default queryset. 
+        Overrides the default queryset.
         - For the 'list' action, it returns only classes the user is a part of.
         - For all other actions, it uses the default queryset (Class.objects.all()),
           allowing actions like 'join' to find any class.
@@ -343,13 +354,13 @@ class ClassViewSet(viewsets.ModelViewSet):
         queryset = super().get_queryset()
 
         # If the action is to list classes, filter it by the current user.
-        if self.action == 'list':
+        if self.action == "list":
             user = self.request.user
             if user.is_authenticated:
                 return queryset.filter(
                     Q(members=user) | Q(experts=user) | Q(admins=user)
                 ).distinct()
-            return queryset.none() # Or handle unauthenticated users as you see fit
+            return queryset.none()  # Or handle unauthenticated users as you see fit
 
         # For 'retrieve', 'update', 'join', 'leave', etc., return the full queryset.
         return queryset
@@ -358,8 +369,6 @@ class ClassViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return ClassCreateSerializer
         return ClassDetailSerializer
-
-
 
     # ================== HELPER METHODS ==================
     def _is_user_in_class(self, user, class_obj):
@@ -485,8 +494,8 @@ class ClassViewSet(viewsets.ModelViewSet):
         )
 
 
-
 #! ==================== TASK MODEL VIEWS ====================
+
 
 class TaskViewSet(viewsets.ModelViewSet):
     """
@@ -496,7 +505,9 @@ class TaskViewSet(viewsets.ModelViewSet):
     - Retrieve: GET /api/tasks/{task_id}/
     - Update: PUT/PATCH /api/tasks/{task_id}/
     - Delete: DELETE /api/tasks/{task_id}/
+    - Get all subs of a task: GET /api/tasks/{task_id}/submissions
     """
+
     queryset = Task.objects.all()
     serializer_class = TaskSerializer
     permission_classes = [IsAuthenticated, IsTaskCreatorOrClassExpert]
@@ -507,13 +518,13 @@ class TaskViewSet(viewsets.ModelViewSet):
         - 'list' and 'retrieve' actions require the user to be a member of the class.
         - Other actions (create, update, destroy) require the user to be the task creator or a class admin.
         """
-        if self.action in ['retrieve', 'submit']:
-            return [IsAuthenticated(), IsClassMember()]
+        if self.action in ["retrieve", "submit","list_submissions"]:
+            return [IsAuthenticated(), IsClassMember(),]
         return super().get_permissions()
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
-    
+
     @action(detail=True, methods=["post"])
     def submit(self, request, pk=None):
         """
@@ -525,7 +536,9 @@ class TaskViewSet(viewsets.ModelViewSet):
         # Prevent submissions if the task is not ongoing
         if timezone.now() > task.dueDate:
             return Response(
-                {"detail": "The deadline for this task has passed. Submissions are no longer accepted."},
+                {
+                    "detail": "The deadline for this task has passed. Submissions are no longer accepted."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -544,6 +557,24 @@ class TaskViewSet(viewsets.ModelViewSet):
         serializer.save(task=task, user=user)
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    @action(detail=True, methods=['get'], url_path='submissions')
+    def list_submissions(self, request, pk=None):
+        """
+        Custom action to retrieve all submissions for this specific task
+        that belong to the currently authenticated user.
+        """
+        task = self.get_object() # This gets the task instance (with ID=pk)
+        
+        # Filter submissions by the task and the logged-in user
+        user_submissions = Submission.objects.filter(
+            task=task,
+            user=request.user
+        )
+        
+        # Serialize the data
+        serializer = SubmissionSerializer(user_submissions, many=True)
+        return Response(serializer.data)
 
 
 class ClassTaskViewSet(viewsets.ReadOnlyModelViewSet):
@@ -551,6 +582,7 @@ class ClassTaskViewSet(viewsets.ReadOnlyModelViewSet):
     Provides a read-only endpoint to list tasks for a specific class.
     - List: GET /api/class/{class_code}/tasks/
     """
+
     serializer_class = TaskSerializer
     permission_classes = [IsAuthenticated]
 
@@ -559,44 +591,55 @@ class ClassTaskViewSet(viewsets.ReadOnlyModelViewSet):
         This view should return a list of all the tasks
         for the class as determined by the class_code portion of the URL.
         """
-        class_code = self.kwargs['class_class_code']
+        class_code = self.kwargs["class_class_code"]
         return Task.objects.filter(class_obj__class_code=class_code)
 
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
 
         # Check if the user is a member of the class
-        class_obj = get_object_or_404(Class, class_code=self.kwargs['class_class_code'])
+        class_obj = get_object_or_404(Class, class_code=self.kwargs["class_class_code"])
         if (
             request.user not in class_obj.members.all()
             and request.user not in class_obj.experts.all()
             and request.user not in class_obj.admins.all()
         ):
-            return Response({"detail": "You are not a member of this class."}, status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "You are not a member of this class."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
-        active_tasks = queryset.filter(status='ongoing')
-        completed_tasks = queryset.filter(status='completed')
+        now = timezone.now()
+
+        active_tasks = queryset.filter(dueDate__gte=now)
+        completed_tasks = queryset.filter(dueDate__lt=now)
 
         data = {
-            'activeTasks': self.get_serializer(active_tasks, many=True).data,
-            'completedTasks': self.get_serializer(completed_tasks, many=True).data,
+            "active_tasks": self.get_serializer(active_tasks, many=True).data,
+            "completed_tasks": self.get_serializer(completed_tasks, many=True).data,
         }
         return Response(data)
-    
 
 
-class SubmissionViewSet(viewsets.ReadOnlyModelViewSet):
+class SubmissionViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    viewsets.GenericViewSet,
+):
     """
-    Provides read-only access to submissions.
+    Provides access to submissions.
+    - List:     GET /api/submissions/ (Lists user's own submissions)
     - Retrieve: GET /api/submissions/{id}/
-    - List:     GET /api/submissions/
+    - Update:   PUT /api/submissions/{id}/
+    - Partial Update: PATCH /api/submissions/{id}/ (e.g., to update the document)
+    Not enabling DELETE submission
     """
+
     queryset = Submission.objects.all()
     serializer_class = SubmissionSerializer
     permission_classes = [IsAuthenticated, IsSubmissionOwner]
 
     def get_queryset(self):
-        """
-        Users should only be able to see their own submissions.
-        """
         return Submission.objects.filter(user=self.request.user)
+    
